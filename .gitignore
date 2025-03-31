@@ -2,6 +2,8 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
+*.pyo
 
 # C extensions
 *.so
@@ -172,3 +174,16 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Visual Studio мусор
+.vs/
+*.suo
+*.user
+*.log
+*.vsidx
+*.cache
+*.VC.db
+*.opendb
+*.ipch
+*.tlog
+*.lastbuildstate
