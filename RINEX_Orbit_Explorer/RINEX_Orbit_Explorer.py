@@ -1,4 +1,4 @@
-﻿# данный код рассчитывает и строит траекторию движения спутника, используя данные из навигационного послания в RINEX-формате
+﻿# данный код рассчитывает и строит эволюции орбиты и параметров спутника, используя данные из навигационного послания в RINEX-формате
 
 import math
 import pandas as pd
@@ -165,12 +165,12 @@ def plot_satellite_orbit(x_positions, y_positions, z_positions):
     
     plt.show()
 
-# визуализация эволюции орбитальных параметров
+# визуализация эволюций орбитальных параметров
 def plot_orbital_parameters(params):
     t = [ti / 3600 for ti in params['t']]
 
     fig, axs = plt.subplots(5, 2, figsize=(14, 12))
-    fig.suptitle("Эволюция орбитальных параметров", fontsize=16)
+    fig.suptitle("Эволюции орбитальных параметров", fontsize=16)
 
     axs[0, 0].plot(t, [math.degrees(val) for val in params['M']], label='M')
     axs[0, 0].set_title("Средняя аномалия (°)")
@@ -210,12 +210,14 @@ def plot_orbital_parameters(params):
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.show()
 
-# функция для вывода координат в таблицу (числовые данные траектории)
-def display_orbit_coordinates(x_positions, y_positions, z_positions, params):
+# функция для вывода координат (числовых данных траектории) в таблицу в консоль и записи в файл 
+def display_orbit_coordinates(x_positions, y_positions, z_positions, params, filename="orbit_coordinates.csv"):
+    # определяем начальные координаты
     X_epoch = x_positions[0]
     Y_epoch = y_positions[0]
     Z_epoch = z_positions[0]
     
+    # создаём словарь с данными
     data = {
         "Время (с)": [params[4]] + list(range(int(params[4]), int(params[4]) + len(x_positions) * 60, 60)),
         "Координата X (м)": [X_epoch] + x_positions,
@@ -223,21 +225,27 @@ def display_orbit_coordinates(x_positions, y_positions, z_positions, params):
         "Координата Z (м)": [Z_epoch] + z_positions
     }
 
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(data) # преобразуем данные в DataFrame
+
+    df.to_csv(filename, index=False)  # запишем данные в CSV файл без индексов
+
     print("\nПолный список координат спутника в системе ECEF:")
-    print(df.to_string(index=False)) # первые 10 точек - print(df.head(10).to_string(index=False))
+    print(df.to_string(index=False))  # печать в консоль без индексов
+
+    print(f"\nДанные записаны в файл {filename}.")
+
 
 # основной код для обработки спутниковых данных
 if __name__ == '__main__':
-    rinex_file_path = 'C:/Users/МАРТА/Desktop/Brdc0020.25n'
+    rinex_file_path = 'C:/Users/МАРТА/RINEX_Orbit_Explorer/RINEX_Orbit_Explorer/Brdc0020.25n'
     satellite_id = 'G01' # ID спутника, данные которого необходимо обработать
 
     satellite_records = parse_rinex_file(rinex_file_path, satellite_id) # чтение и извлечение данных
     params = extract_orbital_params(satellite_records) # извлечение параметров орбиты
 
-    x, y, z, true_anomaly, orbital_params = calculate_orbit(*params) # вывод координат спутника в виде таблицы
+    x, y, z, true_anomaly, orbital_params = calculate_orbit(*params) # вычисление орбиты и параметров
     display_true_anomaly(true_anomaly) # вывод истинной аномалии
 
-    display_orbit_coordinates(x, y, z, params); # вывод координат в виде таблицы
+    display_orbit_coordinates(x, y, z, params, filename="orbit_coordinates.csv") # вывод координат
     plot_satellite_orbit(x, y, z) # визуализация эволюции орбиты спутника
-    plot_orbital_parameters(orbital_params) # визуализация эволюции орбитальных параметров
+    plot_orbital_parameters(orbital_params) # визуализация эволюций орбитальных параметров
