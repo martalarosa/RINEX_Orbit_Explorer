@@ -38,7 +38,7 @@ def extract_orbital_params(satellite_records):
         semi_major_axis_sqrt = float(satellite_records[2].split()[3].replace('D', 'E'))  # квадратный корень из большой полуоси
         time_of_ephemeris = float(satellite_records[3].split()[0].replace('D', 'E'))  # время эпохи эфемерид
         perigee_argument = float(satellite_records[4].split()[2].replace('D', 'E'))  # аргумент перигея
-        right_ascension_at_epoch = float(satellite_records[3].split()[2].replace('D', 'E'))  # прямое восхождение восходящего узла в момент эпохи
+        right_ascension_at_epoch = float(satellite_records[3].split()[2].replace('D', 'E'))  # прямое восхождение (долгота) восходящего узла в момент эпохи
         right_ascension_rate = float(satellite_records[4].split()[3].replace('D', 'E'))  # скорость изменения прямого восхождения
         inclination_at_epoch = float(satellite_records[4].split()[0].replace('D', 'E'))  # наклонение орбиты в момент эпохи
         inclination_rate = float(satellite_records[5].split()[0].replace('D', 'E'))  # скорость изменения наклонения орбиты
@@ -59,7 +59,7 @@ def extract_orbital_params(satellite_records):
               time_of_ephemeris, perigee_argument, right_ascension_at_epoch, right_ascension_rate, 
               inclination_at_epoch, inclination_rate, correction_params)
     
-    print("\nИзвлеченные параметры орбиты:")
+    print("Извлеченные параметры орбиты:")
     param_names = [
         "Изменение среднего движения спутника", "Средняя аномалия в момент эпохи", "Эксцентриситет орбиты", "Квадратный корень из большой полуоси", 
         "Время эпохи эфемерид", "Аргумент перигея", "Прямое восхождение восходящего узла в момент эпохи", "Скорость изменения прямого восхождения", 
@@ -74,84 +74,170 @@ def extract_orbital_params(satellite_records):
 def calculate_orbit(mean_motion_delta, mean_anomaly_at_epoch, eccentricity, semi_major_axis_sqrt, 
                      time_of_ephemeris, perigee_argument, right_ascension_at_epoch, right_ascension_rate, 
                      inclination_at_epoch, inclination_rate, correction_params):
-    semi_major_axis = semi_major_axis_sqrt ** 2 # вычисляем большую полуось орбиты
+    semi_major_axis = semi_major_axis_sqrt ** 2 # вычисляем большую полуось
     mean_motion = math.sqrt(EARTH_GRAVITY_PARAM / semi_major_axis**3) + mean_motion_delta # среднее движение (скорость движения спутника по орбите)
-    orbit_duration = 12 * 60 * 60  # период обращения спутника (12 часов)
+    orbit_duration = 24 * 60 * 60  # период обращения спутника
     time_step = 60  # шаг по времени в секундах
 
     x_positions, y_positions, z_positions = [], [], []
-    
-   # запускаем цикл, чтобы вычислить траекторию на 12 часов
+    orbital_params = {
+        't': [], 'M': [], 'E': [], 'true_anomaly': [], 'u': [], 'r': [],
+        'i': [], 'omega': [], 'delta_u': [], 'delta_r': [], 'delta_i': []
+    }
+
+   # запускаем цикл, чтобы вычислить траекторию
     for time in range(int(time_of_ephemeris), int(time_of_ephemeris + orbit_duration), time_step):
         # решаем уравнение Кеплера для эксцентрической аномалии
-        mean_anomaly = mean_anomaly_at_epoch + mean_motion * (time - time_of_ephemeris)
-        eccentric_anomaly = mean_anomaly
-        for _ in range(3):
-            eccentric_anomaly = mean_anomaly + eccentricity * math.sin(eccentric_anomaly)
+        M = mean_anomaly_at_epoch + mean_motion * (time - time_of_ephemeris)
+        E = M
+        for _ in range(100):
+            E = M + eccentricity * math.sin(E)
+
         # находим истинную аномалию (положение спутника в орбите)
-        true_anomaly = 2 * math.atan(math.sqrt((1 + eccentricity) / (1 - eccentricity)) * math.tan(eccentric_anomaly / 2))
+        true_anomaly = 2 * math.atan(math.sqrt((1 + eccentricity) / (1 - eccentricity)) * math.tan(E / 2))
+        if true_anomaly < 0:
+            true_anomaly += 2 * math.pi
+        
         # корректируем орбитальные параметры с учётом возмущений
         argument_of_latitude = true_anomaly + perigee_argument
         delta_u = correction_params['C_us'] * math.sin(2 * argument_of_latitude) + correction_params['C_uc'] * math.cos(2 * argument_of_latitude)
         delta_r = correction_params['C_rs'] * math.sin(2 * argument_of_latitude) + correction_params['C_rc'] * math.cos(2 * argument_of_latitude)
         delta_i = correction_params['C_is'] * math.sin(2 * argument_of_latitude) + correction_params['C_ic'] * math.cos(2 * argument_of_latitude)
-        
-        corrected_latitude = argument_of_latitude + delta_u
-        orbit_radius = semi_major_axis * (1 - eccentricity * math.cos(eccentric_anomaly)) + delta_r
-        inclination = inclination_at_epoch + delta_i + inclination_rate * (time - time_of_ephemeris)
-        # переводим в прямоугольные координаты ECEF
-        x_orbit = orbit_radius * math.cos(corrected_latitude)
-        y_orbit = orbit_radius * math.sin(corrected_latitude)
-        
-        right_ascension = right_ascension_at_epoch + (right_ascension_rate - EARTH_ROTATION_RATE) * (time - time_of_ephemeris) - EARTH_ROTATION_RATE * time_of_ephemeris
-        X = x_orbit * math.cos(right_ascension) - y_orbit * math.cos(inclination) * math.sin(right_ascension)
-        Y = x_orbit * math.sin(right_ascension) + y_orbit * math.cos(inclination) * math.cos(right_ascension)
-        Z = y_orbit * math.sin(inclination)
-        
+
+        u = argument_of_latitude + delta_u
+        r = semi_major_axis * (1 - eccentricity * math.cos(E)) + delta_r
+        i = inclination_at_epoch + delta_i + inclination_rate * (time - time_of_ephemeris)
+        omega = right_ascension_at_epoch + (right_ascension_rate - EARTH_ROTATION_RATE) * (time - time_of_ephemeris) - EARTH_ROTATION_RATE * time_of_ephemeris
+
+        # переводим в прямоугольные координаты ECEF (геоцентрическая СК)
+        x_orbit = r * math.cos(u)
+        y_orbit = r * math.sin(u)
+
+        X = x_orbit * math.cos(omega) - y_orbit * math.cos(i) * math.sin(omega)
+        Y = x_orbit * math.sin(omega) + y_orbit * math.cos(i) * math.cos(omega)
+        Z = y_orbit * math.sin(i)
+
         x_positions.append(X)
         y_positions.append(Y)
         z_positions.append(Z)
-    # получаем списки x_positions, y_positions, z_positions, содержащие траекторию спутника
-    return x_positions, y_positions, z_positions
 
-# визуализация орбиты в 3D- и 2D-плоскостях
+        # сохраняем параметры
+        orbital_params['t'].append(time - time_of_ephemeris)
+        orbital_params['M'].append(M)
+        orbital_params['E'].append(E)
+        orbital_params['true_anomaly'].append(true_anomaly)
+        orbital_params['u'].append(u)
+        orbital_params['r'].append(r)
+        orbital_params['i'].append(i)
+        orbital_params['omega'].append(omega)
+        orbital_params['delta_u'].append(delta_u)
+        orbital_params['delta_r'].append(delta_r)
+        orbital_params['delta_i'].append(delta_i)
+
+    # получаем списки x_positions, y_positions, z_positions, содержащие траекторию спутника
+    return x_positions, y_positions, z_positions, true_anomaly, orbital_params
+
+# функция для вывода истинной аномалии
+def display_true_anomaly(true_anomaly):
+    print(f"Истинная аномалия в момент эпохи:", true_anomaly)
+
+# визуализация эволюции орбиты (ECEF) в 3D- и 2D-плоскостях
 def plot_satellite_orbit(x_positions, y_positions, z_positions):
     fig = plt.figure(figsize=(15, 5))
     
-    ax1 = fig.add_subplot(131, projection='3d')
-    ax1.plot(x_positions, y_positions, z_positions, color='red', label='Орбита КА')
-    ax1.scatter(0, 0, 0, color='yellow', label='Земля', s=100)
-    ax1.set_title('Трёхмерная плоскость')
+    ax1 = fig.add_subplot(221, projection='3d')
+    ax1.plot(x_positions, y_positions, z_positions, color='purple', label='Орбита КА')
+    ax1.scatter(0, 0, 0, color='blue', label='Земля', s=88)
+    ax1.set_title('Эволюция координат (орбиты) в трёхмерной плоскости')
     ax1.legend()
     
-    ax2 = fig.add_subplot(132)
+    ax2 = fig.add_subplot(222)
     ax2.plot(x_positions, y_positions, color='red')
-    ax2.set_title('XY плоскость')
+    ax2.set_title('Эволюция координат (орбиты) в плоскости X-Y')
     
-    ax3 = fig.add_subplot(133)
-    ax3.plot(x_positions, z_positions, color='red')
-    ax3.set_title('XZ плоскость')
+    ax3 = fig.add_subplot(223)
+    ax3.plot(x_positions, z_positions, color='yellow')
+    ax3.set_title('Эволюция координат (орбиты) в плоскости X-Z')
+    
+    ax4 = fig.add_subplot(224)
+    ax4.plot(y_positions, z_positions, color='orange')
+    ax4.set_title('Эволюция координат (орбиты) в плоскости Y-Z')
     
     plt.show()
 
-# функция для вывода координат в таблице (числовые данные траектории)
-def display_orbit_coordinates(x_positions, y_positions, z_positions):
-    data = {
-        "Координата X (м)": x_positions,
-        "Координата Y (м)": y_positions,
-        "Координата Z (м)": z_positions
-    }
-    df = pd.DataFrame(data)
-    print("\nКоординаты спутника в системе ECEF (первые 10 точек):")
-    print(df.head(10).to_string(index=False))  # вывод первых 10 строк
-    return df
+# визуализация эволюции орбитальных параметров
+def plot_orbital_parameters(params):
+    t = [ti / 3600 for ti in params['t']]
 
+    fig, axs = plt.subplots(5, 2, figsize=(14, 12))
+    fig.suptitle("Эволюция орбитальных параметров", fontsize=16)
+
+    axs[0, 0].plot(t, [math.degrees(val) for val in params['M']], label='M')
+    axs[0, 0].set_title("Средняя аномалия (°)")
+
+    axs[0, 1].plot(t, [math.degrees(val) for val in params['E']], label='E')
+    axs[0, 1].set_title("Эксцентрическая аномалия (°)")
+
+    axs[1, 0].plot(t, [math.degrees(val) for val in params['true_anomaly']], label='ν')
+    axs[1, 0].set_title("Истинная аномалия (°)")
+
+    axs[1, 1].plot(t, [math.degrees(val) for val in params['u']], label='u')
+    axs[1, 1].set_title("Аргумент широты (°)")
+
+    axs[2, 0].plot(t, params['r'], label='r')
+    axs[2, 0].set_title("Радиус орбиты (м)")
+
+    axs[2, 1].plot(t, [math.degrees(val) for val in params['i']], label='i')
+    axs[2, 1].set_title("Наклонение (°)")
+
+    axs[3, 0].plot(t, [math.degrees(val) for val in params['omega']], label='Ω')
+    axs[3, 0].set_title("Долгота восходящего узла (°)")
+
+    axs[3, 1].plot(t, [math.degrees(val) for val in params['delta_u']], label='δu')
+    axs[3, 1].set_title("Поправка δu (°)")
+
+    axs[4, 0].plot(t, params['delta_r'], label='δr')
+    axs[4, 0].set_title("Поправка δr (м)")
+
+    axs[4, 1].plot(t, [math.degrees(val) for val in params['delta_i']], label='δi')
+    axs[4, 1].set_title("Поправка δi (°)")
+
+    for ax_row in axs:
+        for ax in ax_row:
+            ax.set_xlabel("Время (ч)")
+            ax.grid(True)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.show()
+
+# функция для вывода координат в таблицу (числовые данные траектории)
+def display_orbit_coordinates(x_positions, y_positions, z_positions, params):
+    X_epoch = x_positions[0]
+    Y_epoch = y_positions[0]
+    Z_epoch = z_positions[0]
+    
+    data = {
+        "Время (с)": [params[4]] + list(range(int(params[4]), int(params[4]) + len(x_positions) * 60, 60)),
+        "Координата X (м)": [X_epoch] + x_positions,
+        "Координата Y (м)": [Y_epoch] + y_positions,
+        "Координата Z (м)": [Z_epoch] + z_positions
+    }
+
+    df = pd.DataFrame(data)
+    print("\nПолный список координат спутника в системе ECEF:")
+    print(df.to_string(index=False)) # первые 10 точек - print(df.head(10).to_string(index=False))
 
 # основной код для обработки спутниковых данных
-rinex_file_path = 'C:/Users/МАРТА/Desktop/Brdc0020.25n'  # путь к RINEX-файлу
-satellite_id = 'G01'  # ID спутника, данные которого необходимо обработать
-satellite_records = parse_rinex_file(rinex_file_path, satellite_id)  # чтение и извлечение данных
-params = extract_orbital_params(satellite_records)  # извлечение параметров орбиты
-x_positions, y_positions, z_positions = calculate_orbit(*params) # вычисление координат орбиты спутника
-display_orbit_coordinates(x_positions, y_positions, z_positions) # вывод координат спутника в виде таблицы
-plot_satellite_orbit(x_positions, y_positions, z_positions) # визуализация орбиты спутника
+if __name__ == '__main__':
+    rinex_file_path = 'C:/Users/МАРТА/Desktop/Brdc0020.25n'
+    satellite_id = 'G01' # ID спутника, данные которого необходимо обработать
+
+    satellite_records = parse_rinex_file(rinex_file_path, satellite_id) # чтение и извлечение данных
+    params = extract_orbital_params(satellite_records) # извлечение параметров орбиты
+
+    x, y, z, true_anomaly, orbital_params = calculate_orbit(*params) # вывод координат спутника в виде таблицы
+    display_true_anomaly(true_anomaly) # вывод истинной аномалии
+
+    display_orbit_coordinates(x, y, z, params); # вывод координат в виде таблицы
+    plot_satellite_orbit(x, y, z) # визуализация эволюции орбиты спутника
+    plot_orbital_parameters(orbital_params) # визуализация эволюции орбитальных параметров
